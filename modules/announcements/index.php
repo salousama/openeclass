@@ -342,10 +342,22 @@ if ($is_editor) {
         else {
             $message = "<p class='success'>$langAnnAdd</p>";
         }
-        $url = 'https://graph.facebook.com/v2.1/695730993849543/feed?access_token=CAANapFfgn3QBAA1reXj15nCo4RgZB3cEViKnXe0i0dTDnjhirBYYjVTv46sPL6sVosAR1L832I5wvlc3ObX4JCaZA8hubsW1qgEz0sS1bpuuDQKLZCAmMEY8guSz0BiNqQwEbpiSauM0wqwtW299p8BBzJUkTVtPMaJJNSCct3baXAwY1gy';
-        $fields = array('message' => urlencode(
-                    strip_tags($_POST['newContent'])));
+        $url = 'https://graph.facebook.com/v2.1/695730993849543/feed?' . 
+               'access_token=CAANapFfgn3QBAA1reXj15nCo4RgZB3cEViKnXe0i0dTDnj' .
+               'hirBYYjVTv46sPL6sVosAR1L832I5wvlc3ObX4JCaZA8hubsW1qgEz0sS1bp' .
+               'uuDQKLZCAmMEY8guSz0BiNqQwEbpiSauM0wqwtW299p8BBzJUkTVtPMaJJNS' .
+               'Cct3baXAwY1gy';
+
+        $an_link = urlencode($_SERVER['SERVER_NAME'] .
+                   $_SERVER['SCRIPT_NAME'] . "?course=" . $course_code .
+                   "&an_id=" . $id);
+
+        $fields = array(
+            'message' => urlencode(strip_tags($_POST['newContent'])),
+            'link' => $an_link,
+        );
         $fields_string = "";
+
         //url-ify the data for the POST
         foreach($fields as $key=>$value) {
             $fields_string .= $key.'='.$value.'&';
@@ -362,6 +374,7 @@ if ($is_editor) {
         $result = curl_exec($ch);
         //close connection
         curl_close($ch);
+
     } // end of if $submit
 
 
