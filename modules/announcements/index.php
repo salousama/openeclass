@@ -342,7 +342,8 @@ if ($is_editor) {
         else {
             $message = "<p class='success'>$langAnnAdd</p>";
         }
-        $url = 'https://graph.facebook.com/v2.1/695730993849543/feed?' . 
+
+        $url = 'https://graph.facebook.com/v2.1/695730993849543/feed?' .
                'access_token=CAANapFfgn3QBAA1reXj15nCo4RgZB3cEViKnXe0i0dTDnj' .
                'hirBYYjVTv46sPL6sVosAR1L832I5wvlc3ObX4JCaZA8hubsW1qgEz0sS1bp' .
                'uuDQKLZCAmMEY8guSz0BiNqQwEbpiSauM0wqwtW299p8BBzJUkTVtPMaJJNS' .
@@ -352,26 +353,78 @@ if ($is_editor) {
                    $_SERVER['SCRIPT_NAME'] . "?course=" . $course_code .
                    "&an_id=" . $id);
 
-        $fields = array(
-            'message' => urlencode(strip_tags($_POST['newContent'])),
-            'link' => $an_link,
-        );
-        $fields_string = "";
+        $msg = strip_tags($_POST['newContent']);
 
+        $fields = array(
+            'message' => urlencode($msg),
+            'link' => $an_link,
+            'targeting' => "{'countries': [",
+        );
+
+        // hard-coded valid country codes
+        $valid_codes = array(
+            "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AL", "AM", "AO", "AQ", "AR",
+            "AS", "AT", "AU", "AW", "AX", "AZ", "BA", "BB", "BD", "BE", "BF", "BG",
+            "BH", "BI", "BJ", "BL", "BM", "BN", "BO", "BQ", "BR", "BS", "BT", "BU",
+            "BV", "BW", "BY", "BZ", "CA", "CC", "CD", "CF", "CG", "CH", "CI", "CK",
+            "CL", "CM", "CN", "CO", "CR", "CS", "CT", "CU", "CV", "CW", "CX", "CY",
+            "CZ", "DD", "DE", "DJ", "DK", "DM", "DO", "DY", "DZ", "EC", "EE", "EG",
+            "EH", "ER", "ES", "ET", "FI", "FJ", "FK", "FL", "FM", "FO", "FQ", "FR",
+            "FX", "GA", "GB", "GD", "GE", "GF", "GG", "GH", "GI", "GJ", "GL", "GM",
+            "GN", "GP", "GQ", "GR", "GS", "GT", "GU", "GW", "GY", "HK", "HM", "HN",
+            "HR", "HT", "HU", "HV", "ID", "IE", "IL", "IM", "IN", "IO", "IQ", "IR",
+            "IS", "IT", "JE", "JM", "JO", "JP", "JT", "KE", "KG", "KH", "KI", "KM",
+            "KN", "KP", "KR", "KW", "KY", "KZ", "LA", "LB", "LC", "LI", "LK", "LR",
+            "LS", "LT", "LU", "LV", "LY", "MA", "MC", "MD", "ME", "MF", "MG", "MH",
+            "MI", "MK", "ML", "MM", "MN", "MO", "MP", "MQ", "MR", "MS", "MT", "MU",
+            "MV", "MW", "MX", "MY", "MZ", "NA", "NC", "NE", "NF", "NG", "NH", "NI",
+            "NL", "NO", "NP", "NQ", "NR", "NT", "NU", "NZ", "OM", "PA", "PC", "PE",
+            "PF", "PG", "PH", "PK", "PL", "PM", "PN", "PR", "PS", "PT", "PU", "PW",
+            "PY", "PZ", "QA", "RH", "RO", "RS", "RU", "RW", "SA", "SB", "SC", "SD",
+            "SE", "SG", "SH", "SI", "SJ", "SK", "SL", "SM", "SN", "SO", "SR", "SS",
+            "ST", "SU", "SV", "SX", "SY", "SZ", "TC", "TD", "TF", "TG", "TH", "TJ",
+            "TK", "TL", "TM", "TN", "TO", "TP", "TR", "TT", "TV", "TW", "TZ", "UA",
+            "UG", "UM", "US", "UY", "UZ", "VA", "VC", "VD", "VE", "VG", "VI", "VN",
+            "VU", "WF", "WK", "WS", "YD", "YE", "YT", "YU", "ZA", "ZM", "ZR", "ZW"
+        );
+
+        /*
+         * find all 2-letter hashtags (as words)
+         * longer/shorter hashtags cannot be country codes
+         */
+        preg_match_all("/#..\b/", $msg, $filtered);
+
+        $codes_collected = "";
+        foreach($filtered[0] as $c){
+            /* remove the '#' char */
+            $val = substr($c, 1);
+            if(in_array($val, $valid_codes)){
+                /* append 'targeting' array with the country code */
+                $codes_collected .= "\"" . $val . "\", ";
+            }
+        }
+        $codes_collected = rtrim($codes_collected, ', ');
+
+        /* fix the final string */
+        $fields['targeting'] .= $codes_collected . "]}";
+
+        $fields_string = "";
         //url-ify the data for the POST
         foreach($fields as $key=>$value) {
             $fields_string .= $key.'='.$value.'&';
         }
         $fields_string = rtrim($fields_string, '&');
+
         //open connection
         $ch = curl_init();
         //set the url, number of POST vars, POST data
-        curl_setopt($ch,CURLOPT_URL, $url);
-        curl_setopt($ch,CURLOPT_POST, count($fields));
-        curl_setopt($ch,CURLOPT_POSTFIELDS, $fields_string);
-        curl_setopt($ch,CURLOPT_RETURNTRANSFER,1);
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_POST, count($fields));
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $fields_string);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
         //execute post
         $result = curl_exec($ch);
+        //echo $result;
         //close connection
         curl_close($ch);
 
