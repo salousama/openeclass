@@ -357,7 +357,7 @@ draw($tool_content, 2, null, $head_content);
 function add_assignment() {
     global $tool_content, $workPath, $course_id, $uid;
     
-    // get the supported languages from hacherearth
+    // get the supported languages from hackerearth
     global $language_extensions;
 
     $title = $_POST['title'];
