@@ -54,6 +54,26 @@ $workPath = $webDir . "/courses/" . $course_code . "/work";
 $works_url = array('url' => "$_SERVER[SCRIPT_NAME]?course=$course_code", 'name' => $langWorks);
 $nameTools = $langWorks;
 
+/* map languages to their source file extensions
+ * these are the available languages supported from hackerearth
+ */
+$language_extensions = array(
+    "c" => "C",
+    "cpp" => "CPP",
+    "cpp11" => "CPP11", /* there is no such extension, it is a .cpp file as
+                         * well, but it is assumed like this for simplicity
+                         */
+    "clj" => "CLOJURE",
+    "cs" => "CSHARP",
+    "java" => "JAVA",
+    "js" => "JAVASCRIPT",
+    "hs" => "HASKELL",
+    "pl" => "PERL",
+    "php" => "PHP",
+    "py" => "PYTHON",
+    "rb" => "RUBY"
+);
+
 //-------------------------------------------
 // main program
 //-------------------------------------------
@@ -93,6 +113,25 @@ if ($is_editor) {
     global $themeimg, $m;
     $head_content .= "<link rel='stylesheet' type='text/css' href='{$urlAppend}js/jquery-ui-timepicker-addon.min.css'>
     <script type='text/javascript'>
+
+    function check_languages(){
+        /* function to check if the admin chooses at least one language */
+        var langs = document.getElementsByClassName('langs');
+        var found = false;
+        for(i = 0; i < langs.length; i++){
+            if(langs[i].checked){
+                found = true;
+                break;
+            }
+        }
+        if(found)
+            return true;
+        else {
+            alert('You must choose at least one language!');
+            return false;
+        }
+    }
+
     $(function() {
         $('input[name=WorkEnd]').datetimepicker({
             showOn: 'both',
@@ -318,6 +357,9 @@ draw($tool_content, 2, null, $head_content);
 function add_assignment() {
     global $tool_content, $workPath, $course_id, $uid;
     
+    // get the supported languages from hacherearth
+    global $language_extensions;
+
     $title = $_POST['title'];
     $desc = $_POST['desc'];
     $deadline = (trim($_POST['WorkEnd'])!=FALSE) ? date('Y-m-d H:i', strtotime($_POST['WorkEnd'])) : '0000-00-00 00:00:00';
@@ -327,6 +369,20 @@ function add_assignment() {
     $assign_to_specific = filter_input(INPUT_POST, 'assign_to_specific', FILTER_VALIDATE_INT);
     $assigned_to = filter_input(INPUT_POST, 'ingroup', FILTER_VALIDATE_INT, FILTER_REQUIRE_ARRAY);
     $auto_judge = filter_input(INPUT_POST, 'auto_judge', FILTER_VALIDATE_INT);
+    
+    /* get the languages the course admin chose for the assignment
+     * assume POST data are sent as $_POST['py'], ..., for each language
+     */
+    $chosen_langs = "";
+    foreach($language_extensions as $ext => $lang){
+        if(isset($_POST[$ext]) && ($_POST[$ext] === $lang)){
+            /* build a string with a space between chosen languages
+             * that way we can save a single string in the database */  
+            $chosen_langs .= $ext . " ";
+        }
+    }
+    $chosen_langs = rtrim($chosen_langs, " "); // remove last white space
+
     $secret = uniqid('');
 
     if ($assign_to_specific == 1 && empty($assigned_to)) {
@@ -336,11 +392,11 @@ function add_assignment() {
         $id = Database::get()->query("INSERT INTO assignment (course_id, " .
         "title, description, deadline, late_submission, comments, " .
         "submission_date, secret_directory, group_submissions, max_grade, " .
-        "assign_to_specific, auto_judge) " .
-        "VALUES (?d, ?s, ?s, ?t, ?d, ?s, ?t, ?s, ?d, ?d, ?d,?d)", $course_id,
+        "assign_to_specific, auto_judge, languages) " .
+        "VALUES (?d, ?s, ?s, ?t, ?d, ?s, ?t, ?s, ?d, ?d, ?d, ?d, ?s)", $course_id,
         $title, $desc, $deadline, $late_submission, '', date("Y-m-d H:i:s"),
         $secret, $group_submissions, $max_grade, $assign_to_specific,
-        $auto_judge)->lastInsertID;
+        $auto_judge, $chosen_langs)->lastInsertID;
         $secret = work_secret($id);
         if ($id) {
             $local_name = uid_to_name($uid);
@@ -427,11 +483,17 @@ function submit_work($id, $on_behalf_of = null) {
             }
         }
     } //checks for submission validity end here
-    
-    $row = Database::get()->querySingle("SELECT title, group_submissions, auto_judge FROM assignment WHERE course_id = ?d AND id = ?d", $course_id, $id);
+
+    $row = Database::get()->querySingle("SELECT title, group_submissions, " .
+        "auto_judge, languages FROM assignment WHERE course_id = ?d AND " .
+        "id = ?d", $course_id, $id);
     $title = q($row->title);
     $group_sub = $row->group_submissions;
     $auto_judge = $row->auto_judge;
+
+    // take acceptable languages string and return them as an array
+    $chosen_langs = explode(" ", $row->languages);
+
     $nav[] = $works_url;
     $nav[] = array('url' => "$_SERVER[SCRIPT_NAME]?id=$id", 'name' => $title);
 
@@ -534,39 +596,63 @@ function submit_work($id, $on_behalf_of = null) {
         if($auto_judge){
             // Auto-judge: Send file to hackearth
             global $hackerEarthKey;
-            $content = file_get_contents("$workPath/$filename");
+            global $language_extensions;
 
-            //set POST variables
-            $url = 'http://api.hackerearth.com/code/run/';
-            $fields = array(
-                'client_secret' => $hackerEarthKey,
-                'source' => $content,
-                'lang' => 'PYTHON'
-            );
+            // get the file extension from submitted filename
+            $extension = end(explode(".", $filename));
 
-            //url-ify the data for the POST
-            foreach($fields as $key=>$value) {
-                $fields_string .= $key.'='.$value.'&';
+            // assume an invalid filename
+            $comment = "Not a valid language";  // grader comment
+            $grade = 0;
+            if(in_array($extension, $chosen_langs)){
+                // if it is an acceptable extension, get the source
+                $content = file_get_contents("$workPath/$filename");
+
+                //set POST variables
+                $url = 'http://api.hackerearth.com/code/run/';
+                $fields = array(
+                    'client_secret' => $hackerEarthKey,
+                    'source' => urlencode($content),  /* urlencode, otherwise
+                                                       * the source code is
+                                                       * sent corrupted
+                                                       */
+                    'lang' => $language_extensions[$ext]
+                );
+
+                //url-ify the data for the POST
+                foreach($fields as $key=>$value) {
+                    $fields_string .= $key.'='. $value.'&';
+                }
+                rtrim($fields_string, '&');
+
+                //open connection
+                $ch = curl_init();
+                //set the url, number of POST vars, POST data
+                curl_setopt($ch, CURLOPT_URL, $url);
+                curl_setopt($ch, CURLOPT_POST, count($fields));
+                curl_setopt($ch, CURLOPT_POSTFIELDS, $fields_string);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+                //execute post
+                $result = curl_exec($ch);
+                $result = json_decode($result, true);
+
+                /* set the grader comment
+                 * if it is compiled successfully, the comment is the output of
+                 * the execution, otherwise the comment is the compile status
+                 */
+                $comment = $result['compile_status'];
+                if($comment === "OK"){
+                    $comment = trim($result['run_status']['output']);
+                    $grade = 10;
+                }
+                //$result['run_status']['output'] =
+                //    trim($result['run_status']['output']);
+
+                // End Auto-judge
             }
-            rtrim($fields_string, '&');
-
-            //open connection
-            $ch = curl_init();
-            //set the url, number of POST vars, POST data
-            curl_setopt($ch,CURLOPT_URL, $url);
-            curl_setopt($ch,CURLOPT_POST, count($fields));
-            curl_setopt($ch,CURLOPT_POSTFIELDS, $fields_string);
-            curl_setopt($ch,CURLOPT_RETURNTRANSFER,1);
-            //execute post
-            $result = curl_exec($ch);
-            $result = json_decode($result, true);
-            $result['run_status']['output'] =
-                trim($result['run_status']['output']);
-
-            // Add the output as a comment
-            submit_grade_comments($id, $sid, 10, 'Output: ' .
-                $result['run_status']['output'], false);
-            // End Auto-judge
+            // finally, submit the comment
+            submit_grade_comments($id, $sid, $grade, 'Output: ' . $comment,
+                                  false);
         }
 
     } else { // not submit_ok
@@ -586,7 +672,9 @@ function new_assignment() {
                         </ul></div>";
     
     $tool_content .= "
-        <form enctype='multipart/form-data' action='$_SERVER[SCRIPT_NAME]?course=$course_code' method='post'>
+        <form enctype='multipart/form-data'
+        action='$_SERVER[SCRIPT_NAME]?course=$course_code' method='post'
+            onsubmit='return check_languages()'>
         <fieldset>
         <legend>$m[WorkInfo]</legend>
         <table class='tbl' width='100%'>    
@@ -630,6 +718,33 @@ function new_assignment() {
         <tr>
           <th>Auto-judge:</th>
           <td><input type='checkbox' id='auto_judge' name='auto_judge' value='1' checked='1' /></td>
+        </tr>
+        <tr>
+            <th>Languages:</th>
+            <td><input type='checkbox' name='c' value='C' class='langs'>C<br />
+            <input type='checkbox' name='cpp' value='CPP' class='langs'>C++
+            <br/>
+            <input type='checkbox' name='cpp11' value='CPP11' class='langs'>
+            C++11<br />
+            <input type='checkbox' name='clj' value='CLOJURE' class='langs'>
+            Clojure<br />
+            <input type='checkbox' name='cs' value='CSHARP' class='langs'>C#
+            <br/>
+            <input type='checkbox' name='java' value='JAVA' class='langs'>Java
+            <br />
+            <input type='checkbox' name='js' value='JAVASCRIPT' class='langs'>
+            JavaScript<br />
+            <input type='checkbox' name='hs' value='HASKELL' class='langs'>
+            Haskell<br />
+            <input type='checkbox' name='pl' value='PERL' class='langs'>Perl
+            <br />
+            <input type='checkbox' name='php' value='PHP' class='langs'>PHP
+            <br />
+            <input type='checkbox' name='py' value='PYTHON' class='langs'>
+            Python <br />
+            <input type='checkbox' name='rb' value='RUBY' class='langs'>Ruby
+            <br />
+            </td>
         </tr>
         <tr id='assignees_tbl' style='display:none;'>
           <th class='left' valign='top'></th>
@@ -1222,6 +1337,25 @@ function assignment_details($id, $row) {
         $tool_content .= "$m[group_work]</td>
         </tr>";
     }
+
+    global $language_extensions;
+
+    // get the acceptable file extensions for the assignment as an array
+    $extensions = explode(" ", $row->languages);
+
+    // create a string with the corresponding languages for display to the user
+    $acceptable = "";
+    foreach($extensions as $e)
+        $acceptable .= $language_extensions[$e] . ", ";
+
+    $acceptable = rtrim($acceptable, ', ');
+
+    // replace 'PP' with '++' in case of having C++ or C++11
+    $acceptable = str_replace("PP", "++", $acceptable);
+
+    $tool_content .= "<tr><th>Acceptable languages</th><td>" . $acceptable .
+                     "</td></tr>";
+
     $tool_content .= "
         </table>
         </fieldset>";
