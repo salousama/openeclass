@@ -144,6 +144,7 @@ if ($is_editor) {
         $('input[name=group_submissions]').click(changeAssignLabel);
         $('input[id=assign_button_some]').click(ajaxAssignees);        
         $('input[id=assign_button_all]').click(hideAssignees);
+        $('input[name=auto_judge]').click(changeAutojudgeScenariosVisibility);
         function hideAssignees()
         {
             $('#assignees_tbl').hide();
@@ -188,6 +189,41 @@ if ($is_editor) {
                 $('#assign_box').find('option').remove().end().append(select_content);
             });
         }
+
+        function changeAutojudgeScenariosVisibility() {
+            if($(this).is(':checked')) {
+                $(this).parent().find('table').show();
+            }
+            else {
+                $(this).parent().find('table').hide();
+            }
+        }
+
+        $('#autojudge_new_scenario').click(
+            function(e) {
+                var rows =
+                    $(this).parent().parent().parent().find('tr').size()-1;
+               // clone the first line
+                var newLine =
+                $(this).parent().parent().parent().find('tr:first').clone();
+                // replace 0 with the line number 
+                newLine.html(newLine.html().replace(/auto_judge_scenarios\[0\]/g,
+                'auto_judge_scenarios['+rows+']'));
+                // initialize the remove event and show the button
+                newLine.find('.autojudge_remove_scenario').show();
+                newLine.find('.autojudge_remove_scenario').click(removeRow);
+                // insert it just before the final line
+                newLine.insertBefore($(this).parent().parent().parent().find('tr:last'));
+                e.preventDefault();
+                return false;
+            });
+
+        function removeRow() {
+            $(this).parent().parent().remove();
+            e.preventDefault();
+            return false;
+        }
+        $('autojudge_remove_scenario').click(removeRow);
     });
     
     </script>";    
@@ -369,6 +405,17 @@ function add_assignment() {
     $assign_to_specific = filter_input(INPUT_POST, 'assign_to_specific', FILTER_VALIDATE_INT);
     $assigned_to = filter_input(INPUT_POST, 'ingroup', FILTER_VALIDATE_INT, FILTER_REQUIRE_ARRAY);
     $auto_judge = filter_input(INPUT_POST, 'auto_judge', FILTER_VALIDATE_INT);
+
+    echo $_POST['auto_judge_scenarios'][0]['input'] . "<br />";
+    echo $_POST['auto_judge_scenarios'][1]['input'] . "<br />";
+    echo $_POST['auto_judge_scenarios'][2]['input'] . "<br />";
+    echo $_POST['auto_judge_scenarios'][3]['input'] . "<br />";
+    
+    //foreach($_POST['auto_judge_scenarios'][0]['input'] as $k => $v){
+        //echo $k . ' => ' . $v . "<br/>";
+    //    echo $v . "<br/>";
+    //}
+    $auto_judge_scenarios = serialize($_POST['auto_judge_scenarios']);
     
     /* get the languages the course admin chose for the assignment
      * assume POST data are sent as $_POST['py'], ..., for each language
@@ -392,11 +439,12 @@ function add_assignment() {
         $id = Database::get()->query("INSERT INTO assignment (course_id, " .
         "title, description, deadline, late_submission, comments, " .
         "submission_date, secret_directory, group_submissions, max_grade, " .
-        "assign_to_specific, auto_judge, languages) " .
-        "VALUES (?d, ?s, ?s, ?t, ?d, ?s, ?t, ?s, ?d, ?d, ?d, ?d, ?s)", $course_id,
-        $title, $desc, $deadline, $late_submission, '', date("Y-m-d H:i:s"),
-        $secret, $group_submissions, $max_grade, $assign_to_specific,
-        $auto_judge, $chosen_langs)->lastInsertID;
+        "assign_to_specific, auto_judge, languages, auto_judge_scenarios) " .
+        "VALUES (?d, ?s, ?s, ?t, ?d, ?s, ?t, ?s, ?d, ?d, ?d, ?d, ?s, ?s)",
+        $course_id, $title, $desc, $deadline, $late_submission, '',
+        date("Y-m-d H:i:s"), $secret, $group_submissions, $max_grade,
+        $assign_to_specific, $auto_judge, $chosen_langs,
+        $auto_judge_scenarios)->lastInsertID;
         $secret = work_secret($id);
         if ($id) {
             $local_name = uid_to_name($uid);
@@ -485,11 +533,12 @@ function submit_work($id, $on_behalf_of = null) {
     } //checks for submission validity end here
 
     $row = Database::get()->querySingle("SELECT title, group_submissions, " .
-        "auto_judge, languages FROM assignment WHERE course_id = ?d AND " .
+        "auto_judge, languages, auto_judge_scenarios FROM assignment WHERE course_id = ?d AND " .
         "id = ?d", $course_id, $id);
     $title = q($row->title);
     $group_sub = $row->group_submissions;
     $auto_judge = $row->auto_judge;
+    $auto_judge_scenarios = $auto_judge == true ? unserialize($row->auto_judge_scenarios) : null;
 
     // take acceptable languages string and return them as an array
     $chosen_langs = explode(" ", $row->languages);
@@ -604,6 +653,7 @@ function submit_work($id, $on_behalf_of = null) {
             // assume an invalid filename
             $comment = "Not a valid language";  // grader comment
             $grade = 0;
+            $passed = 0;
             if(in_array($extension, $chosen_langs)){
                 // if it is an acceptable extension, get the source
                 $content = file_get_contents("$workPath/$filename");
@@ -616,42 +666,51 @@ function submit_work($id, $on_behalf_of = null) {
                                                        * the source code is
                                                        * sent corrupted
                                                        */
+                    'input' => null,
                     'lang' => $language_extensions[$ext]
                 );
 
-                //url-ify the data for the POST
-                foreach($fields as $key=>$value) {
-                    $fields_string .= $key.'='. $value.'&';
-                }
-                rtrim($fields_string, '&');
+                foreach($auto_judge_scenarios as $curScenario){
+                    echo "IN: " . $curScenario['input'] . "<br />";
+                    $fields['input'] = $curScenario['input'];
 
-                //open connection
-                $ch = curl_init();
-                //set the url, number of POST vars, POST data
-                curl_setopt($ch, CURLOPT_URL, $url);
-                curl_setopt($ch, CURLOPT_POST, count($fields));
-                curl_setopt($ch, CURLOPT_POSTFIELDS, $fields_string);
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-                //execute post
-                $result = curl_exec($ch);
-                $result = json_decode($result, true);
+                    //url-ify the data for the POST
+                    foreach($fields as $key=>$value) {
+                        $fields_string .= $key.'='. $value.'&';
+                    }
+                    rtrim($fields_string, '&');
 
-                /* set the grader comment
-                 * if it is compiled successfully, the comment is the output of
-                 * the execution, otherwise the comment is the compile status
-                 */
-                $comment = $result['compile_status'];
-                if($comment === "OK"){
-                    $comment = trim($result['run_status']['output']);
-                    $grade = 10;
-                }
-                //$result['run_status']['output'] =
-                //    trim($result['run_status']['output']);
+                    //open connection
+                    $ch = curl_init();
+                    //set the url, number of POST vars, POST data
+                    curl_setopt($ch, CURLOPT_URL, $url);
+                    curl_setopt($ch, CURLOPT_POST, count($fields));
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, $fields_string);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+                    //execute post
+                    $result = curl_exec($ch);
+                    echo $result . "<br />";
+                    $result = json_decode($result, true);
+
+                    /* set the grader comment
+                    * if it is compiled successfully, the comment is the output of
+                    * the execution, otherwise the comment is the compile status
+                    */
+                    //$comment = $result['compile_status'];
+                    //if($comment === "OK"){
+                    $temp = trim($result['run_status']['output']);
+                    if($temp == $curScenario['output']){
+                        $passed++;
+                    }
+                    //}
 
                 // End Auto-judge
+                }
             }
+            $grade = round($passed / count($auto_judge_scenarios) * 10);
             // finally, submit the comment
-            submit_grade_comments($id, $sid, $grade, 'Output: ' . $comment,
+            submit_grade_comments($id, $sid, $grade, 'Tests passed: ' .
+                                  $passed . "/" . count($auto_judge_scenarios),
                                   false);
         }
 
@@ -717,8 +776,39 @@ function new_assignment() {
         </tr>
         <tr>
           <th>Auto-judge:</th>
-          <td><input type='checkbox' id='auto_judge' name='auto_judge' value='1' checked='1' /></td>
-        </tr>
+          <td>
+          <input type='checkbox' id='auto_judge' name='auto_judge' value='1' checked='1' />
+          <table>
+            <thead>
+                <tr>
+                    <th>Input</th>
+                    <th>Expected Output</th>
+                    <th>Delete</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>
+                    <input type='text'name='auto_judge_scenarios[0][input]'/>
+                    </td>
+                    <td>
+                    <input type='text'name='auto_judge_scenarios[0][output]'/>
+                    </td>
+                    <td><a href='#' class='autojudge_remove_scenario'
+                    style='display: none;'>X</a>
+                    </td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td></td>
+                    <td><input type='submit' value='Νέο Σενάριο'
+                    id='autojudge_new_scenario' />
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+        </td>
+      </tr>
         <tr>
             <th>Languages:</th>
             <td><input type='checkbox' name='c' value='C' class='langs'>C<br />
