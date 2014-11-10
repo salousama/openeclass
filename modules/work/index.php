@@ -209,6 +209,8 @@ if ($is_editor) {
                 // replace 0 with the line number 
                 newLine.html(newLine.html().replace(/auto_judge_scenarios\[0\]/g,
                 'auto_judge_scenarios['+rows+']'));
+                // remove values in case we are in edit-assignment page
+                newLine.html(newLine.html().replace(/(value=\".*?\")/g, ' '));
                 // initialize the remove event and show the button
                 newLine.find('.autojudge_remove_scenario').show();
                 newLine.find('.autojudge_remove_scenario').click(removeRow);
@@ -218,11 +220,35 @@ if ($is_editor) {
                 return false;
             });
 
-        function removeRow() {
-            $(this).parent().parent().remove();
-            e.preventDefault();
+        function removeRow(e) {
+            var rows =
+                $(this).parent().parent().parent().find('tr').size() - 1;
+            if(rows > 1){
+                /* when editing an assignment, we cannot have auto-judge
+                 * without scenarios
+                 */
+                $(this).parent().parent().remove();
+                e.preventDefault();
+            }
+            else{
+                alert('Cannot use auto-judge with no scenarios!');
+            }
             return false;
         }
+
+        $(function helper(){
+            flag = true;
+            elems =
+                document.getElementsByClassName('autojudge_remove_scenario');
+            for(i = 0; i < elems.length; i++){
+                /* attach event listener to existing scenarios
+                 * this is needed when editing an assignment (fetch from db)
+                 */
+                elems[i].addEventListener('click', removeRow);
+                flag = false;
+            }
+        });
+
         $('autojudge_remove_scenario').click(removeRow);
     });
     
@@ -406,17 +432,8 @@ function add_assignment() {
     $assigned_to = filter_input(INPUT_POST, 'ingroup', FILTER_VALIDATE_INT, FILTER_REQUIRE_ARRAY);
     $auto_judge = filter_input(INPUT_POST, 'auto_judge', FILTER_VALIDATE_INT);
 
-    echo $_POST['auto_judge_scenarios'][0]['input'] . "<br />";
-    echo $_POST['auto_judge_scenarios'][1]['input'] . "<br />";
-    echo $_POST['auto_judge_scenarios'][2]['input'] . "<br />";
-    echo $_POST['auto_judge_scenarios'][3]['input'] . "<br />";
-    
-    //foreach($_POST['auto_judge_scenarios'][0]['input'] as $k => $v){
-        //echo $k . ' => ' . $v . "<br/>";
-    //    echo $v . "<br/>";
-    //}
     $auto_judge_scenarios = serialize($_POST['auto_judge_scenarios']);
-    
+
     /* get the languages the course admin chose for the assignment
      * assume POST data are sent as $_POST['py'], ..., for each language
      */
@@ -671,7 +688,6 @@ function submit_work($id, $on_behalf_of = null) {
                 );
 
                 foreach($auto_judge_scenarios as $curScenario){
-                    echo "IN: " . $curScenario['input'] . "<br />";
                     $fields['input'] = $curScenario['input'];
 
                     //url-ify the data for the POST
@@ -689,7 +705,6 @@ function submit_work($id, $on_behalf_of = null) {
                     curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
                     //execute post
                     $result = curl_exec($ch);
-                    echo $result . "<br />";
                     $result = json_decode($result, true);
 
                     /* set the grader comment
@@ -874,7 +889,6 @@ function new_assignment() {
 
 //form for editing
 function show_edit_assignment($id) {
-    
     global $tool_content, $m, $langEdit, $langBack, $course_code,
     $urlAppend, $works_url, $course_id, 
     $langStudents, $langMove, $langWorkFile, $themeimg;
@@ -992,7 +1006,74 @@ function show_edit_assignment($id) {
           <th>$m[WorkAssignTo]:</th>
           <td><input type='radio' id='assign_button_all' name='assign_to_specific' value='0'".(($row->assign_to_specific==1) ? '' : 'checked')."  /><label for='assign_button_all'>Όλους</label>
           <br /><input type='radio' id='assign_button_some' name='assign_to_specific' value='1'".(($row->assign_to_specific==1) ? 'checked' : '')." /><label for='assign_button_some'>".(($row->group_submissions) ? $m['WorkToGroup'] : $m['WorkToUser'])."</label></td>
-        </tr>        
+        </tr>
+
+    <tr>
+          <th>Auto-judge:</th>
+          <td>
+          <input type='checkbox' id='auto_judge' name='auto_judge' value='1'".
+          ($row->auto_judge == "" ? "" : "checked=\"checked\"") . " />
+          <table ";
+    /* display as it is saved in database
+     * if we have auto-judge keep it checked
+     */
+    if($row->auto_judge == ""){
+        // hide table if auto-judge not checked
+        $tool_content .= "style='display: none;'";
+    }
+    $tool_content .= ">
+            <thead>
+                <tr>
+                    <th>Input</th>
+                    <th>Expected Output</th>
+                    <th>Delete</th>
+                </tr>
+            </thead>
+            <tbody>";
+    if($row->auto_judge != ""){
+        // display scenarios from database
+        $auto_judge_scenarios = unserialize($row->auto_judge_scenarios);
+        foreach($auto_judge_scenarios as $idx => $scenario){
+            $tool_content .= "<tr>";
+            foreach($scenario as $key => $val){
+                $tool_content .=
+                "<td><input type='text' name='auto_judge_scenarios[" . $idx .
+                "][" . $key . "]' value='" . $val . "'/></td>";
+            }
+            $tool_content .=
+            "<td><a href='#' class='autojudge_remove_scenario'>X</a></td></tr>";
+        }
+    }
+    else{
+        /* if no auto-judge was selected in creation, then add an empty
+         * scenario */
+        $tool_content .=
+            "<tr>
+                <td>
+                <input type='text'name='auto_judge_scenarios[0][input]'/>
+                </td>
+                <td>
+                <input type='text'name='auto_judge_scenarios[0][output]'/>
+                </td>
+                <td><a href='#' class='autojudge_remove_scenario'
+                style='display: none;'>X</a>
+                </td>
+            </tr>";
+    }
+    $tool_content .=
+            "<tr>
+                <td></td>
+                <td></td>
+                <td><input type='submit' value='Νέο Σενάριο'
+                id='autojudge_new_scenario'/>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+        </td>
+      </tr>
+
+
         <tr id='assignees_tbl'".(($row->assign_to_specific==1) ? '' : 'style="display:none;"').">
           <th class='left' valign='top'></th>
           <td>
@@ -1002,6 +1083,7 @@ function show_edit_assignment($id) {
                 <td width='100' class='center'>$langMove</td>
                 <td class='center'>$m[WorkAssignTo]</td>
               </tr>
+
               <tr>
                 <td>
                   <select id='assign_box' size='15' style='width:180px' multiple>
@@ -1044,7 +1126,20 @@ function edit_assignment($id) {
     $max_grade = filter_input(INPUT_POST, 'max_grade', FILTER_VALIDATE_FLOAT);
     $assign_to_specific = filter_input(INPUT_POST, 'assign_to_specific', FILTER_VALIDATE_INT);
     $assigned_to = filter_input(INPUT_POST, 'ingroup', FILTER_VALIDATE_INT, FILTER_REQUIRE_ARRAY);
-    
+    $auto_judge = filter_input(INPUT_POST, 'auto_judge', FILTER_VALIDATE_INT);
+
+    if($auto_judge == 0){
+        /* if no auto-judge, no point in having scenarios
+         * one approach is to keep any existent scenarios if auto-judge was
+         * selected in creation. Here we assume that if someone wants to remove
+         * auto-judge, the scenarios are removed as well
+         */
+        $auto_judge_scenarios = "";
+    }
+    else{
+        $auto_judge_scenarios = serialize($_POST['auto_judge_scenarios']);
+    }
+
     if ($assign_to_specific == 1 && empty($assigned_to)) {
         $assign_to_specific = 0;
     }
@@ -1086,9 +1181,12 @@ function edit_assignment($id) {
     }   
     Database::get()->query("UPDATE assignment SET title = ?s, description = ?s, 
         group_submissions = ?d, comments = ?s, deadline = ?t, late_submission = ?d, max_grade = ?d, 
-        assign_to_specific = ?d, file_path = ?s, file_name = ?s
+        assign_to_specific = ?d, file_path = ?s, file_name = ?s,
+        auto_judge = ?d, auto_judge_scenarios = ?s
         WHERE course_id = ?d AND id = ?d", $title, $desc, $group_submissions, 
-        $comments, $deadline, $late_submission, $max_grade, $assign_to_specific, $filename, $file_name, $course_id, $id);
+        $comments, $deadline, $late_submission, $max_grade,
+        $assign_to_specific, $filename, $file_name, $auto_judge,
+        $auto_judge_scenarios, $course_id, $id);
 
     Database::get()->query("DELETE FROM assignment_to_specific WHERE assignment_id = ?d", $id);
 
