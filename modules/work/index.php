@@ -210,7 +210,7 @@ if ($is_editor) {
                 newLine.html(newLine.html().replace(/auto_judge_scenarios\[0\]/g,
                 'auto_judge_scenarios['+rows+']'));
                 // remove values in case we are in edit-assignment page
-                newLine.html(newLine.html().replace(/(value=\".*?\")/g, ' '));
+                newLine.html(newLine.html().replace(/value=\".*?\"/g, ' '));
                 // initialize the remove event and show the button
                 newLine.find('.autojudge_remove_scenario').show();
                 newLine.find('.autojudge_remove_scenario').click(removeRow);
@@ -236,20 +236,7 @@ if ($is_editor) {
             return false;
         }
 
-        $(function helper(){
-            flag = true;
-            elems =
-                document.getElementsByClassName('autojudge_remove_scenario');
-            for(i = 0; i < elems.length; i++){
-                /* attach event listener to existing scenarios
-                 * this is needed when editing an assignment (fetch from db)
-                 */
-                elems[i].addEventListener('click', removeRow);
-                flag = false;
-            }
-        });
-
-        $('autojudge_remove_scenario').click(removeRow);
+        $('.autojudge_remove_scenario').click(removeRow);
     });
     
     </script>";    
